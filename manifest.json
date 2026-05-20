@@ -1,0 +1,9 @@
+{
+  "description": "IDS single camera capture with Spot RemoteMissionService",
+  "version": "1.0.0",
+  "extension_name": "ids_single_camera",
+  "udev_rules": "99-ids-usb.rules",
+  "images": [
+    "ids_single_camera.tgz"
+  ]
+}

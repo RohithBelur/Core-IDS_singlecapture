@@ -1,0 +1,68 @@
+# Dockerfile.l4t – image that will run on CORE I/O
+FROM nvcr.io/nvidia/l4t-jetpack:r35.3.1
+
+# Basic system deps
+RUN apt-get update && apt-get install -y \
+    usbutils \
+    python3 python3-pip python3-dev \
+    libusb-1.0-0 libglu1-mesa libxcb-xinerama0 \
+    ca-certificates \
+    python3-grpcio python3-grpc-tools \
+ && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /app
+
+# ---- Install IDS peak runtime from vendor tarball ----
+COPY ids-peak-with-ueyetl_2.17.1.0-559_arm64.tar.gz /tmp/
+
+RUN set -eux; \
+    mkdir -p /opt/ids; \
+    tar -xzf /tmp/ids-peak-with-ueyetl_2.17.1.0-559_arm64.tar.gz -C /opt/ids; \
+    rm /tmp/ids-peak-with-ueyetl_2.17.1.0-559_arm64.tar.gz; \
+    # Make install location deterministic
+    IDS_DIR="$(find /opt/ids -maxdepth 1 -type d -name 'ids-peak-with-*' | head -n 1)"; \
+    test -n "$IDS_DIR"; \
+    ln -sfn "$IDS_DIR" /opt/ids/ids-peak; \
+    test -d /opt/ids/ids-peak/lib
+
+# IDS runtime env (needed for GenTL + shared libs)
+ENV IDS_PEAK_ROOT=/opt/ids/ids-peak
+ENV GENICAM_GENTL64_PATH=${IDS_PEAK_ROOT}/lib/ids/cti
+ENV LD_LIBRARY_PATH=${IDS_PEAK_ROOT}/lib:${LD_LIBRARY_PATH}
+ENV PYTHONNOUSERSITE=1
+
+# ---- Python deps ----
+# Upgrade pip so it can resolve/install manylinux wheels cleanly
+RUN python3 -m pip install --upgrade pip setuptools wheel
+
+# Install a modern numpy BEFORE IDS wheels (fix ABI mismatch with IDS manylinux wheels)
+RUN python3 -m pip install --no-cache-dir "numpy==1.23.5"
+
+# Install IDS Python bindings (now numpy ABI is compatible)
+RUN python3 -m pip install --no-cache-dir \
+    "ids_peak_ipl==1.16.1.0.4" \
+ && python3 -m pip install --no-cache-dir \
+    "ids_peak==1.11.1.0.5" \
+ && python3 -m pip install --no-cache-dir \
+    "ids_peak_afl==1.7.0.0.2" \
+ && python3 -c "import numpy as np; print(np.__version__); from ids_peak import ids_peak; import ids_peak_ipl; import ids_peak_afl; print('IDS Python bindings OK')"
+
+# App Python deps
+# bosdyn-client pulls grpcio; we already installed grpcio via apt -> use --no-deps to avoid source build
+RUN python3 -m pip install --no-cache-dir imageio pillow \
+ && python3 -m pip install --no-cache-dir bosdyn-api bosdyn-core \
+ && python3 -m pip install --no-cache-dir \
+      deprecated requests pyjwt pynacl protobuf \
+ && python3 -m pip install --no-cache-dir --no-deps bosdyn-client
+
+RUN python3 -c "import numpy as np; print('numpy', np.__version__); \
+from ids_peak import ids_peak; import ids_peak_ipl, ids_peak_afl; \
+import bosdyn.client, bosdyn.api; import deprecated; \
+print('All imports OK')"
+
+# ---- App code ----
+COPY src/ /app/
+
+RUN mkdir -p /data/captures
+
+CMD ["python3", "/app/robot_command_mission_service.py"]

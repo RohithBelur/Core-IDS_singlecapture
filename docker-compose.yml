@@ -1,0 +1,32 @@
+version: "3.8"
+
+services:
+  ids_single_camera:
+    image: ids_single_camera:1.0
+    restart: unless-stopped
+    network_mode: host
+
+    # USB camera access
+    devices:
+      - "/dev/bus/usb:/dev/bus/usb"
+
+    volumes:
+      - /data:/data
+      - /data/ids_single_camera/src/single_camera_controller.py:/app/single_camera_controller.py:ro
+      - /data/ids_single_camera/src/robot_command_mission_service.py:/app/robot_command_mission_service.py:ro
+
+    environment:
+      # Spot connection / creds
+      SPOT_HOSTNAME: "192.168.50.3"
+      SPOT_USERNAME: "user"
+      SPOT_PASSWORD: "jwxecfunvw53"
+
+      # Where images get written (inside container, mapped to host /data)
+      CAPTURE_DIR: "/data/captures"
+
+      # IDS runtime env (redundant if set in Dockerfile, but OK to keep)
+      GENICAM_GENTL64_PATH: "/opt/ids/ids-peak/lib/ids/cti"
+      LD_LIBRARY_PATH: "/opt/ids/ids-peak/lib"
+
+    # Start RemoteMissionService and register reachable address on payload network
+    command: ["python3", "/app/robot_command_mission_service.py", "--host-ip", "192.168.50.5", "--port", "21222", "192.168.50.3"]
